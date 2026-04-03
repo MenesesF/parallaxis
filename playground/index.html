@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parallaxis — Verify LLM Output</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .tagline {
+            color: #888;
+            font-size: 1rem;
+            font-style: italic;
+        }
+
+        .quote {
+            color: #666;
+            font-size: 0.85rem;
+            margin-top: 1rem;
+            font-style: italic;
+        }
+
+        .input-section {
+            margin-bottom: 2rem;
+        }
+
+        textarea {
+            width: 100%;
+            height: 150px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 1rem;
+            color: #e0e0e0;
+            font-size: 1rem;
+            font-family: inherit;
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+
+        textarea::placeholder {
+            color: #555;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            align-items: center;
+        }
+
+        button {
+            background: linear-gradient(135deg, #3b82f6, #7c3aed);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .mode-toggle {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .mode-toggle label { cursor: pointer; }
+        .mode-toggle input { accent-color: #7c3aed; }
+
+        .results {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 1.5rem;
+            display: none;
+        }
+
+        .results.visible { display: block; }
+
+        .score-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .score {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .score.high { color: #4ade80; }
+        .score.medium { color: #fbbf24; }
+        .score.low { color: #f87171; }
+
+        .meta {
+            text-align: right;
+            color: #666;
+            font-size: 0.8rem;
+        }
+
+        .claim {
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+
+        .claim.confirmed {
+            background: rgba(74, 222, 128, 0.08);
+            border-left-color: #4ade80;
+        }
+
+        .claim.contradicted {
+            background: rgba(248, 113, 113, 0.08);
+            border-left-color: #f87171;
+        }
+
+        .claim.imprecise {
+            background: rgba(251, 191, 36, 0.08);
+            border-left-color: #fbbf24;
+        }
+
+        .claim.divergent {
+            background: rgba(251, 191, 36, 0.08);
+            border-left-color: #fb923c;
+        }
+
+        .claim.unverifiable {
+            background: rgba(148, 163, 184, 0.08);
+            border-left-color: #64748b;
+        }
+
+        .claim.opinion {
+            background: rgba(168, 85, 247, 0.08);
+            border-left-color: #a855f7;
+        }
+
+        .claim.debunked {
+            background: rgba(248, 113, 113, 0.12);
+            border-left-color: #dc2626;
+        }
+
+        .claim.outdated {
+            background: rgba(251, 191, 36, 0.08);
+            border-left-color: #d97706;
+        }
+
+        .claim-text {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .claim-status {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .claim-status .icon { margin-right: 0.25rem; }
+
+        .claim-detail {
+            font-size: 0.85rem;
+            color: #888;
+            margin-top: 0.25rem;
+        }
+
+        .disclaimer {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid #2a2a2a;
+            color: #555;
+            font-size: 0.75rem;
+            font-style: italic;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #888;
+        }
+
+        .loading .spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #333;
+            border-top-color: #60a5fa;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .examples {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #222;
+        }
+
+        .examples h3 {
+            color: #888;
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .example-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .chip {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #aaa;
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .chip:hover {
+            border-color: #60a5fa;
+            color: #60a5fa;
+        }
+
+        .ask-section {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #222;
+        }
+
+        .ask-section h3 {
+            color: #888;
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .ask-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .ask-row input {
+            flex: 1;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 0.6rem 1rem;
+            color: #e0e0e0;
+            font-size: 0.95rem;
+        }
+
+        .ask-row input:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+
+        .ask-row button {
+            padding: 0.6rem 1.5rem;
+            font-size: 0.95rem;
+        }
+
+        .ask-result {
+            margin-top: 0.75rem;
+            padding: 1rem;
+            background: #1a1a1a;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .ask-result.visible { display: block; }
+
+        .ask-answer {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #4ade80;
+        }
+
+        .ask-source {
+            font-size: 0.85rem;
+            color: #888;
+            margin-top: 0.25rem;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 3rem;
+            color: #444;
+            font-size: 0.8rem;
+        }
+
+        footer a { color: #60a5fa; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⟁ Parallaxis</h1>
+            <p class="tagline">Factual verification layer for LLM output</p>
+            <p class="quote">"Pode não ser tão fluente. Pode não conversar tão bonito.<br>
+            Mas quando disser algo, você pode confiar — ou pelo menos auditar por que disse."</p>
+        </header>
+
+        <div class="input-section">
+            <textarea id="input" placeholder="Paste LLM output here to verify...&#10;&#10;Example: Brazil is the largest country in South America with a population of 215 million. Its capital is Brasília, and it shares borders with every South American country except Chile and Ecuador."></textarea>
+            <div class="controls">
+                <button id="verify-btn" onclick="doVerify()">Verify</button>
+                <div class="mode-toggle">
+                    <input type="checkbox" id="explain-mode">
+                    <label for="explain-mode">Detailed mode</label>
+                </div>
+            </div>
+        </div>
+
+        <div id="loading" class="loading" style="display:none">
+            <span class="spinner"></span> Verifying claims against the Vault...
+        </div>
+
+        <div id="results" class="results"></div>
+
+        <div class="ask-section">
+            <h3>💬 Ask the Vault directly</h3>
+            <div class="ask-row">
+                <input type="text" id="ask-input" placeholder="What is the capital of Japan?" onkeypress="if(event.key==='Enter')doAsk()">
+                <button onclick="doAsk()">Ask</button>
+            </div>
+            <div id="ask-result" class="ask-result"></div>
+        </div>
+
+        <div class="examples">
+            <h3>Try these examples</h3>
+            <div class="example-chips">
+                <span class="chip" onclick="setExample(this)">Brasília is the capital of Brazil</span>
+                <span class="chip" onclick="setExample(this)">Rio de Janeiro is the capital of Brazil</span>
+                <span class="chip" onclick="setExample(this)">Beijing is the capital of Japan</span>
+                <span class="chip" onclick="setExample(this)">France shares a border with Germany</span>
+                <span class="chip" onclick="setExample(this)">Brazil has a population of 215 million</span>
+            </div>
+        </div>
+
+        <footer>
+            <p>Parallaxis v0.1.0 — Open Source (AGPL-3.0)</p>
+            <p>Vault: Geography (Wikidata) — <a href="/info">/info</a> — <a href="/health">/health</a></p>
+        </footer>
+    </div>
+
+    <script>
+        const API = '';  // same origin
+
+        function setExample(el) {
+            document.getElementById('input').value = el.textContent;
+        }
+
+        async function doVerify() {
+            const text = document.getElementById('input').value.trim();
+            if (!text) return;
+
+            const mode = document.getElementById('explain-mode').checked ? 'explain' : 'simple';
+            const btn = document.getElementById('verify-btn');
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+
+            btn.disabled = true;
+            loading.style.display = 'block';
+            results.className = 'results';
+            results.innerHTML = '';
+
+            try {
+                const resp = await fetch(API + '/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, mode })
+                });
+
+                const data = await resp.json();
+                renderResults(data, resp.headers);
+            } catch (e) {
+                results.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`;
+                results.className = 'results visible';
+            } finally {
+                btn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+
+        function renderResults(data, headers) {
+            const results = document.getElementById('results');
+            
+            const scoreClass = data.score >= 0.8 ? 'high' : data.score >= 0.5 ? 'medium' : 'low';
+            const scorePercent = Math.round(data.score * 100);
+            const coveragePercent = Math.round(data.coverage * 100);
+
+            let html = `
+                <div class="score-bar">
+                    <div>
+                        <div class="score ${scoreClass}">${scorePercent}%</div>
+                        <div style="color:#888;font-size:0.85rem">confidence score</div>
+                    </div>
+                    <div class="meta">
+                        <div>Coverage: ${coveragePercent}%</div>
+                        <div>Vault: ${data.vault_version || 'unknown'}</div>
+                        <div>Extract: ${headers.get('x-parallaxis-latency-extract') || '?'}</div>
+                        <div>Verify: ${headers.get('x-parallaxis-latency-verify') || '?'}</div>
+                    </div>
+                </div>
+            `;
+
+            for (const seg of (data.segments || [])) {
+                const statusBase = seg.status.split(' ')[0].split('(')[0].trim();
+                const icon = getIcon(statusBase);
+                
+                html += `
+                    <div class="claim ${statusBase}">
+                        <div class="claim-text">"${escHtml(seg.text)}"</div>
+                        <div class="claim-status">${icon} ${escHtml(seg.status)}</div>
+                        ${seg.source ? `<div class="claim-detail">📎 ${escHtml(seg.source)}</div>` : ''}
+                        ${seg.vault_value ? `<div class="claim-detail">Vault: ${escHtml(seg.vault_value)}</div>` : ''}
+                        ${seg.explanation ? `<div class="claim-detail">💡 ${escHtml(seg.explanation)}</div>` : ''}
+                    </div>
+                `;
+            }
+
+            html += `<div class="disclaimer">${escHtml(data.disclaimer || '')}</div>`;
+
+            results.innerHTML = html;
+            results.className = 'results visible';
+        }
+
+        function getIcon(status) {
+            const icons = {
+                confirmed: '<span class="icon">✓</span>',
+                contradicted: '<span class="icon">✗</span>',
+                imprecise: '<span class="icon">~</span>',
+                divergent: '<span class="icon">⚠</span>',
+                unverifiable: '<span class="icon">?</span>',
+                opinion: '<span class="icon">💭</span>',
+                debunked: '<span class="icon">🚫</span>',
+                outdated: '<span class="icon">⏰</span>',
+                conditional: '<span class="icon">⚡</span>',
+                oversimplified: '<span class="icon">📌</span>',
+            };
+            return icons[status] || '<span class="icon">•</span>';
+        }
+
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        async function doAsk() {
+            const question = document.getElementById('ask-input').value.trim();
+            if (!question) return;
+
+            const result = document.getElementById('ask-result');
+
+            try {
+                const resp = await fetch(API + '/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question })
+                });
+
+                const data = await resp.json();
+
+                if (data.found) {
+                    result.innerHTML = `
+                        <div class="ask-answer">${escHtml(data.answer)}</div>
+                        <div class="ask-source">📎 ${escHtml(data.source)} — Confidence: ${escHtml(data.confidence)}</div>
+                    `;
+                } else {
+                    result.innerHTML = `<div style="color:#888">No answer found in the Vault for this question.</div>`;
+                }
+                result.className = 'ask-result visible';
+            } catch (e) {
+                result.innerHTML = `<div style="color:#f87171">Error: ${e.message}</div>`;
+                result.className = 'ask-result visible';
+            }
+        }
+    </script>
+</body>
+</html>

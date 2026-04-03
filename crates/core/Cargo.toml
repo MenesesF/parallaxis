@@ -1,0 +1,11 @@
+[package]
+name = "parallaxis-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core types for Parallaxis — factual verification layer"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "parallaxis-extractor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Claim extraction from LLM text — decomposes into verifiable triples"
+
+[dependencies]
+parallaxis-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }

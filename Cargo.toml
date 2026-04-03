@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/vault",
+    "crates/extractor",
+    "crates/normalizer",
+    "crates/verifier",
+    "crates/tagger",
+    "crates/protocol",
+    "bins/parallaxis",
+    "tools/vault-import",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+authors = ["Fernando Meneses"]
+repository = "https://github.com/MenesesF/parallaxis"
+
+[workspace.dependencies]
+parallaxis-core = { path = "crates/core" }
+parallaxis-vault = { path = "crates/vault" }
+parallaxis-extractor = { path = "crates/extractor" }
+parallaxis-normalizer = { path = "crates/normalizer" }
+parallaxis-verifier = { path = "crates/verifier" }
+parallaxis-tagger = { path = "crates/tagger" }
+parallaxis-protocol = { path = "crates/protocol" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"

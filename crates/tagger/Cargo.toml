@@ -1,0 +1,12 @@
+[package]
+name = "parallaxis-tagger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Reassembles verified claims into tagged text output"
+
+[dependencies]
+parallaxis-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

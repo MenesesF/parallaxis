@@ -1,0 +1,14 @@
+[package]
+name = "parallaxis-verifier"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Claim verification against the Vault — direct lookup + mini-reasoner"
+
+[dependencies]
+parallaxis-core = { workspace = true }
+parallaxis-vault = { workspace = true }
+parallaxis-normalizer = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

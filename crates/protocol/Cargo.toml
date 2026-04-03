@@ -1,0 +1,21 @@
+[package]
+name = "parallaxis-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "HTTP API for Parallaxis (axum-based)"
+
+[dependencies]
+parallaxis-core = { workspace = true }
+parallaxis-vault = { workspace = true }
+parallaxis-extractor = { workspace = true }
+parallaxis-normalizer = { workspace = true }
+parallaxis-verifier = { workspace = true }
+parallaxis-tagger = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }

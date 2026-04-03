@@ -1,0 +1,23 @@
+[package]
+name = "parallaxis-bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Parallaxis CLI — factual verification for LLM output"
+
+[[bin]]
+name = "parallaxis"
+path = "src/main.rs"
+
+[dependencies]
+parallaxis-core = { workspace = true }
+parallaxis-vault = { workspace = true }
+parallaxis-extractor = { workspace = true }
+parallaxis-verifier = { workspace = true }
+parallaxis-tagger = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+parallaxis-protocol = { workspace = true }

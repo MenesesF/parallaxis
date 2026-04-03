@@ -1,0 +1,15 @@
+[package]
+name = "parallaxis-vault"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Knowledge graph storage for Parallaxis — binary format with mmap"
+
+[dependencies]
+parallaxis-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+memmap2 = "0.9"

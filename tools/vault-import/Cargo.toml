@@ -1,0 +1,21 @@
+[package]
+name = "parallaxis-vault-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Import tool for populating Parallaxis Vaults from Wikidata and other sources"
+
+[[bin]]
+name = "vault-import"
+path = "src/main.rs"
+
+[dependencies]
+parallaxis-core = { workspace = true }
+parallaxis-vault = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
