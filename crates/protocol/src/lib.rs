@@ -227,29 +227,54 @@ async fn ask(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AskRequest>,
 ) -> Json<AskResponse> {
-    // Simple pattern: try to extract entity + predicate from the question
-    // "What is the capital of Brazil?" → entity="Brazil", predicate="capital"
     let question_lower = req.question.to_lowercase();
 
-    // Try common patterns
-    let result = try_parse_question(&question_lower, &state.vault);
-
-    match result {
-        Some((answer, source, confidence)) => Json(AskResponse {
+    // 1. Try rule-based patterns first (instant, no API call)
+    if let Some((answer, source, confidence)) = try_parse_question(&question_lower, &state.vault) {
+        return Json(AskResponse {
             question: req.question,
             answer: Some(answer),
             source: Some(source),
             confidence: Some(format!("{:?}", confidence)),
             found: true,
-        }),
-        None => Json(AskResponse {
-            question: req.question,
-            answer: None,
-            source: None,
-            confidence: None,
-            found: false,
-        }),
+        });
     }
+
+    // 2. If LLM is configured, use it to understand the question
+    if let (Some(url), Some(key), Some(model)) = (
+        &state.config.llm_api_url,
+        &state.config.llm_api_key,
+        &state.config.llm_model,
+    ) {
+        if let Some(result) = llm_parse_question(url, key, model, &req.question, &state.vault).await {
+            return Json(AskResponse {
+                question: req.question,
+                answer: Some(result.0),
+                source: Some(result.1),
+                confidence: Some(format!("{:?}", result.2)),
+                found: true,
+            });
+        }
+    }
+
+    // 3. Last resort: fuzzy search — find any entity mentioned in the question
+    if let Some((answer, source, confidence)) = fuzzy_search(&question_lower, &state.vault) {
+        return Json(AskResponse {
+            question: req.question,
+            answer: Some(answer),
+            source: Some(source),
+            confidence: Some(format!("{:?}", confidence)),
+            found: true,
+        });
+    }
+
+    Json(AskResponse {
+        question: req.question,
+        answer: None,
+        source: None,
+        confidence: None,
+        found: false,
+    })
 }
 
 /// Try to parse a question and answer from the vault.
@@ -302,6 +327,138 @@ fn try_parse_question(question: &str, vault: &Vault) -> Option<(String, String, 
     }
 
     None
+}
+
+/// Fuzzy search: find any entity mentioned in the question text,
+/// then try to find a matching predicate.
+fn fuzzy_search(question: &str, vault: &Vault) -> Option<(String, String, Confidence)> {
+    let clean = question.trim_end_matches('?').trim();
+    let clean_normalized = parallaxis_vault::graph::normalize_text(clean);
+
+    // Common predicate keywords to look for in the question
+    let predicate_hints = [
+        ("capital", "capital"),
+        ("população", "population"),
+        ("populacao", "population"),
+        ("population", "population"),
+        ("área", "area"),
+        ("area", "area"),
+        ("continente", "continent"),
+        ("continent", "continent"),
+        ("fronteira", "borders"),
+        ("border", "borders"),
+        ("moeda", "currency"),
+        ("currency", "currency"),
+        ("idioma", "official_language"),
+        ("língua", "official_language"),
+        ("lingua", "official_language"),
+        ("language", "official_language"),
+    ];
+
+    // Find which predicate the user is asking about
+    let mut target_predicate = None;
+    for (keyword, pred_name) in &predicate_hints {
+        if clean_normalized.contains(keyword) {
+            target_predicate = Some(*pred_name);
+            break;
+        }
+    }
+
+    // Try to find an entity mentioned in the question
+    // Strategy: check all entity labels against the question text
+    let entities_found = vault.graph.find_entities_in_text(&clean_normalized);
+
+    for (entity_id, _label) in &entities_found {
+        // If we know what predicate they want, look it up directly
+        if let Some(pred_name) = target_predicate {
+            if let Some(pred) = vault.find_predicate(pred_name) {
+                let relations = vault.lookup(*entity_id, pred.id);
+                if let Some(relation) = relations.first() {
+                    let answer = format_value(&relation.value, vault);
+                    let source = format!("{} ({})", relation.source.name, relation.source.locator);
+                    return Some((answer, source, relation.confidence));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn format_value(value: &Value, vault: &Vault) -> String {
+    match value {
+        Value::Entity(eid) => {
+            vault.get_entity(*eid)
+                .and_then(|e| e.labels.first().map(|l| l.text.clone()))
+                .unwrap_or_else(|| format!("Entity({})", eid.0))
+        }
+        Value::Text(t) => t.clone(),
+        Value::Number { value, unit } => format!("{} {:?}", value, unit),
+        Value::Boolean(b) => b.to_string(),
+        Value::Coordinate { lat, lon } => format!("{}, {}", lat, lon),
+        Value::Date { timestamp, .. } => format!("timestamp:{}", timestamp),
+        Value::List(items) => format!("{} items", items.len()),
+    }
+}
+
+/// Use LLM to parse the question into entity + predicate, then look up in vault.
+async fn llm_parse_question(
+    api_url: &str,
+    api_key: &str,
+    model: &str,
+    question: &str,
+    vault: &Vault,
+) -> Option<(String, String, Confidence)> {
+    let predicates: Vec<String> = vault.graph.all_predicates()
+        .map(|p| p.name.clone())
+        .collect();
+
+    let prompt = format!(
+        r#"Extract the entity and predicate from this question.
+Available predicates: {}
+
+Question: "{}"
+
+Respond with ONLY valid JSON: {{"entity": "name", "predicate": "predicate_name"}}
+Nothing else."#,
+        predicates.join(", "),
+        question
+    );
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(api_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 100,
+            "temperature": 0.0
+        }))
+        .send()
+        .await
+        .ok()?;
+
+    let data: serde_json::Value = resp.json().await.ok()?;
+    let content = data["choices"][0]["message"]["content"].as_str()?;
+
+    // Parse the JSON response
+    let json_str = if let Some(start) = content.find('{') {
+        if let Some(end) = content.rfind('}') {
+            &content[start..=end]
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    };
+
+    let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let entity = parsed["entity"].as_str()?;
+    let predicate = parsed["predicate"].as_str()?;
+
+    lookup_in_vault(vault, predicate, entity)
 }
 
 fn lookup_in_vault(vault: &Vault, predicate: &str, entity: &str) -> Option<(String, String, Confidence)> {

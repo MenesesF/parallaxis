@@ -813,6 +813,7 @@ dependencies = [
  "parallaxis-tagger",
  "parallaxis-vault",
  "parallaxis-verifier",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

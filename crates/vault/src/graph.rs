@@ -142,6 +142,26 @@ impl KnowledgeGraph {
             .unwrap_or_default()
     }
 
+    /// Find all entities whose labels appear in the given text.
+    /// Returns (EntityId, matched_label) sorted by label length (longest first).
+    pub fn find_entities_in_text(&self, text: &str) -> Vec<(EntityId, String)> {
+        let mut found: Vec<(EntityId, String)> = Vec::new();
+        let normalized = normalize_text(text);
+
+        for (label, &entity_id) in &self.label_index {
+            if label.len() >= 3 && normalized.contains(label.as_str()) {
+                found.push((entity_id, label.clone()));
+            }
+        }
+
+        // Sort by label length descending (prefer longer/more specific matches)
+        found.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        // Deduplicate by entity ID
+        let mut seen = std::collections::HashSet::new();
+        found.retain(|(id, _)| seen.insert(*id));
+        found
+    }
+
     /// Add a label alias mapping directly: label text → entity ID.
     /// Also adds the label to the entity for persistence.
     pub fn add_label_mapping(&mut self, label: &str, language: &str, entity_id: EntityId) {
@@ -183,8 +203,13 @@ impl KnowledgeGraph {
     }
 }
 
+/// Normalize text: lowercase + remove accents.
+pub fn normalize_text(s: &str) -> String {
+    remove_accents(&s.to_lowercase())
+}
+
 /// Remove common accents/diacritics for fuzzy matching.
-fn remove_accents(s: &str) -> String {
+pub fn remove_accents(s: &str) -> String {
     s.chars()
         .map(|c| match c {
             'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
