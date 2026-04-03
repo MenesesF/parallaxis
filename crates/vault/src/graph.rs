@@ -97,7 +97,7 @@ impl KnowledgeGraph {
             .unwrap_or_default()
     }
 
-    /// Find entity by label text (case-insensitive, accent-insensitive).
+    /// Find entity by label text (case-insensitive, accent-insensitive, typo-tolerant).
     pub fn find_entity_by_label(&self, label: &str) -> Option<&Entity> {
         let lower = label.to_lowercase();
         // Try exact match first
@@ -106,9 +106,26 @@ impl KnowledgeGraph {
         }
         // Try without accents
         let normalized = remove_accents(&lower);
-        self.label_index
-            .get(&normalized)
-            .and_then(|id| self.entities.get(id))
+        if let Some(id) = self.label_index.get(&normalized) {
+            return self.entities.get(id);
+        }
+        // Fuzzy match — tolerate typos (Levenshtein distance ≤ 2)
+        let mut best_match: Option<(&EntityId, usize)> = None;
+        for (indexed_label, id) in &self.label_index {
+            // Only compare labels of similar length (skip wildly different ones)
+            let len_diff = (indexed_label.len() as isize - normalized.len() as isize).unsigned_abs();
+            if len_diff > 2 {
+                continue;
+            }
+            let dist = levenshtein(&normalized, indexed_label);
+            let max_dist = if normalized.len() <= 4 { 1 } else { 2 };
+            if dist <= max_dist {
+                if best_match.is_none() || dist < best_match.unwrap().1 {
+                    best_match = Some((id, dist));
+                }
+            }
+        }
+        best_match.and_then(|(id, _)| self.entities.get(id))
     }
 
     /// Find predicate by name or alias (case-insensitive).
@@ -144,13 +161,40 @@ impl KnowledgeGraph {
 
     /// Find all entities whose labels appear in the given text.
     /// Returns (EntityId, matched_label) sorted by label length (longest first).
+    /// Supports fuzzy matching for typos.
     pub fn find_entities_in_text(&self, text: &str) -> Vec<(EntityId, String)> {
         let mut found: Vec<(EntityId, String)> = Vec::new();
         let normalized = normalize_text(text);
+        let words: Vec<&str> = normalized.split_whitespace().collect();
 
         for (label, &entity_id) in &self.label_index {
-            if label.len() >= 3 && normalized.contains(label.as_str()) {
+            if label.len() < 3 {
+                continue;
+            }
+            // Exact substring match
+            if normalized.contains(label.as_str()) {
                 found.push((entity_id, label.clone()));
+                continue;
+            }
+            // Fuzzy: check if any word sequence in text is close to the label
+            let label_words: Vec<&str> = label.split_whitespace().collect();
+            if label_words.len() == 1 {
+                // Single-word label: check each word
+                for word in &words {
+                    if levenshtein(word, label) <= 1 {
+                        found.push((entity_id, label.clone()));
+                        break;
+                    }
+                }
+            } else if label_words.len() <= words.len() {
+                // Multi-word label: check consecutive word sequences
+                for window in words.windows(label_words.len()) {
+                    let joined: String = window.join(" ");
+                    if levenshtein(&joined, label) <= 2 {
+                        found.push((entity_id, label.clone()));
+                        break;
+                    }
+                }
             }
         }
 
@@ -201,6 +245,32 @@ impl KnowledgeGraph {
     pub fn all_predicates(&self) -> impl Iterator<Item = &Predicate> {
         self.predicates.values()
     }
+}
+
+/// Levenshtein edit distance between two strings.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let n = a.len();
+    let m = b.len();
+
+    if n == 0 { return m; }
+    if m == 0 { return n; }
+
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0; m + 1];
+
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)
+                .min(curr[j - 1] + 1)
+                .min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
 }
 
 /// Normalize text: lowercase + remove accents.
