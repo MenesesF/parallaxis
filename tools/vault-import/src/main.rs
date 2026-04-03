@@ -62,6 +62,9 @@ async fn import_geography(output_path: &PathBuf) -> Result<()> {
     info!("Fetching borders...");
     fetch_borders(&client, &mut vault).await?;
 
+    info!("Fetching Brazilian states...");
+    fetch_brazilian_states(&client, &mut vault).await?;
+
     info!("Fetching continents...");
     fetch_continents(&client, &mut vault).await?;
 
@@ -676,6 +679,171 @@ SELECT ?continent ?continentLabel ?coord WHERE {
         }
     }
 
+    Ok(())
+}
+
+async fn fetch_brazilian_states(client: &reqwest::Client, vault: &mut Vault) -> Result<()> {
+    let query = r#"
+SELECT ?state ?stateLabel ?stateLabelPt ?capital ?capitalLabel ?capitalLabelPt ?population ?area WHERE {
+  ?state wdt:P31 wd:Q485258.
+  OPTIONAL { ?state wdt:P36 ?capital. }
+  OPTIONAL { ?state wdt:P1082 ?population. }
+  OPTIONAL { ?state wdt:P2046 ?area. }
+  OPTIONAL { ?state rdfs:label ?stateLabelPt FILTER(LANG(?stateLabelPt) = "pt"). }
+  OPTIONAL { ?capital rdfs:label ?capitalLabelPt FILTER(LANG(?capitalLabelPt) = "pt"). }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}
+"#;
+
+    let data = sparql_query(client, query).await?;
+    let bindings = data["results"]["bindings"]
+        .as_array()
+        .ok_or_else(|| ParallaxisError::Vault("No bindings".into()))?;
+
+    info!("Got {} Brazilian state rows", bindings.len());
+
+    let source = wikidata_source();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let mut seen = HashMap::new();
+
+    for row in bindings {
+        let state_uri = match row["state"]["value"].as_str() {
+            Some(u) => u,
+            None => continue,
+        };
+        let state_label_en = row["stateLabel"]["value"].as_str().unwrap_or("Unknown");
+        let state_label_pt = row["stateLabelPt"]["value"].as_str();
+
+        let state_qid = match extract_qid(state_uri) {
+            Some(q) => q,
+            None => continue,
+        };
+
+        // Create entity if not seen
+        if !seen.contains_key(&state_qid) {
+            let state_id = EntityId(10000 + seen.len() as u64);
+            seen.insert(state_qid.clone(), state_id);
+
+            let mut labels = vec![Label {
+                text: state_label_en.to_string(),
+                language: "en".to_string(),
+                primary: true,
+            }];
+            if let Some(pt) = state_label_pt {
+                labels.push(Label {
+                    text: pt.to_string(),
+                    language: "pt".to_string(),
+                    primary: true,
+                });
+            }
+
+            vault.add_entity(Entity {
+                id: state_id,
+                kind: EntityKind {
+                    id: 6,
+                    name: "state".to_string(),
+                    parent: None,
+                },
+                labels,
+                domain: DomainId(1),
+            });
+
+            // Capital
+            if let Some(cap_uri) = row["capital"]["value"].as_str() {
+                if let Some(_cap_qid) = extract_qid(cap_uri) {
+                    let cap_label_en = row["capitalLabel"]["value"].as_str().unwrap_or("Unknown");
+                    let cap_label_pt = row["capitalLabelPt"]["value"].as_str();
+
+                    let cap_id = EntityId(20000 + seen.len() as u64);
+
+                    if vault.find_entity_by_label(cap_label_en).is_none() {
+                        let mut cap_labels = vec![Label {
+                            text: cap_label_en.to_string(),
+                            language: "en".to_string(),
+                            primary: true,
+                        }];
+                        if let Some(pt) = cap_label_pt {
+                            if pt.to_lowercase() != cap_label_en.to_lowercase() {
+                                cap_labels.push(Label {
+                                    text: pt.to_string(),
+                                    language: "pt".to_string(),
+                                    primary: true,
+                                });
+                            }
+                        }
+                        vault.add_entity(Entity {
+                            id: cap_id,
+                            kind: EntityKind {
+                                id: 2,
+                                name: "city".to_string(),
+                                parent: None,
+                            },
+                            labels: cap_labels,
+                            domain: DomainId(1),
+                        });
+                    }
+
+                    // Find the capital entity (might already exist)
+                    if let Some(cap_entity) = vault.find_entity_by_label(cap_label_en) {
+                        vault.add_relation(Relation {
+                            id: next_relation_id(),
+                            subject: state_id,
+                            predicate: PredicateId(1), // capital
+                            value: Value::Entity(cap_entity.id),
+                            confidence: Confidence::Verified,
+                            source: source.clone(),
+                            domain: DomainId(1),
+                            valid_from: None,
+                            valid_until: None,
+                            timestamp: now,
+                        });
+                    }
+                }
+            }
+
+            // Population
+            if let Some(pop_str) = row["population"]["value"].as_str() {
+                if let Ok(pop) = pop_str.parse::<f64>() {
+                    vault.add_relation(Relation {
+                        id: next_relation_id(),
+                        subject: state_id,
+                        predicate: PredicateId(2),
+                        value: Value::Number { value: pop, unit: Unit::Count },
+                        confidence: Confidence::Attested,
+                        source: source.clone(),
+                        domain: DomainId(1),
+                        valid_from: None,
+                        valid_until: None,
+                        timestamp: now,
+                    });
+                }
+            }
+
+            // Area
+            if let Some(area_str) = row["area"]["value"].as_str() {
+                if let Ok(area) = area_str.parse::<f64>() {
+                    vault.add_relation(Relation {
+                        id: next_relation_id(),
+                        subject: state_id,
+                        predicate: PredicateId(3),
+                        value: Value::Number { value: area, unit: Unit::SquareKilometer },
+                        confidence: Confidence::Attested,
+                        source: source.clone(),
+                        domain: DomainId(1),
+                        valid_from: None,
+                        valid_until: None,
+                        timestamp: now,
+                    });
+                }
+            }
+        }
+    }
+
+    info!("Added {} Brazilian states", seen.len());
     Ok(())
 }
 

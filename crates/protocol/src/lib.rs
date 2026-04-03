@@ -256,15 +256,20 @@ async fn ask(
 fn try_parse_question(question: &str, vault: &Vault) -> Option<(String, String, Confidence)> {
     // Patterns to try:
     // "what is the X of Y" / "qual é o/a X do/da Y"
+    // Full patterns: "what is the X of Y", "qual é a X do Y"
     let patterns = [
         ("what is the ", " of "),
         ("what's the ", " of "),
+        ("qual é a ", " de "),
         ("qual é a ", " do "),
         ("qual é a ", " da "),
+        ("qual é o ", " de "),
         ("qual é o ", " do "),
         ("qual é o ", " da "),
+        ("qual a ", " de "),
         ("qual a ", " do "),
         ("qual a ", " da "),
+        ("qual o ", " de "),
         ("qual o ", " do "),
         ("qual o ", " da "),
     ];
@@ -276,45 +281,49 @@ fn try_parse_question(question: &str, vault: &Vault) -> Option<(String, String, 
                 let predicate = &rest[..sep_pos].trim();
                 let entity = &rest[sep_pos + separator.len()..].trim();
 
-                // Look up in vault
-                if let Some(found_entity) = vault.find_entity_by_label(entity) {
-                    if let Some(found_pred) = vault.find_predicate(predicate) {
-                        let relations = vault.lookup(found_entity.id, found_pred.id);
-                        if let Some(relation) = relations.first() {
-                            let answer = match &relation.value {
-                                Value::Entity(eid) => {
-                                    vault.get_entity(*eid)
-                                        .and_then(|e| e.labels.first().map(|l| l.text.clone()))
-                                        .unwrap_or_else(|| format!("Entity({})", eid.0))
-                                }
-                                Value::Text(t) => t.clone(),
-                                Value::Number { value, unit } => {
-                                    format!("{} {:?}", value, unit)
-                                }
-                                Value::Boolean(b) => b.to_string(),
-                                Value::Coordinate { lat, lon } => {
-                                    format!("{}, {}", lat, lon)
-                                }
-                                Value::Date { timestamp, .. } => {
-                                    format!("timestamp:{}", timestamp)
-                                }
-                                Value::List(items) => {
-                                    format!("{} items", items.len())
-                                }
-                            };
-
-                            let source = format!(
-                                "{} ({})",
-                                relation.source.name, relation.source.locator
-                            );
-
-                            return Some((answer, source, relation.confidence));
-                        }
-                    }
+                if let Some(found) = lookup_in_vault(vault, predicate, entity) {
+                    return Some(found);
                 }
             }
         }
     }
 
+    // Short patterns: "X de Y?", "X of Y?"
+    let short_separators = [" de ", " do ", " da ", " of "];
+    let clean = question.trim_end_matches('?').trim();
+    for sep in &short_separators {
+        if let Some(sep_pos) = clean.find(sep) {
+            let predicate = clean[..sep_pos].trim();
+            let entity = clean[sep_pos + sep.len()..].trim();
+            if let Some(found) = lookup_in_vault(vault, predicate, entity) {
+                return Some(found);
+            }
+        }
+    }
+
     None
+}
+
+fn lookup_in_vault(vault: &Vault, predicate: &str, entity: &str) -> Option<(String, String, Confidence)> {
+    let found_entity = vault.find_entity_by_label(entity)?;
+    let found_pred = vault.find_predicate(predicate)?;
+    let relations = vault.lookup(found_entity.id, found_pred.id);
+    let relation = relations.first()?;
+
+    let answer = match &relation.value {
+        Value::Entity(eid) => {
+            vault.get_entity(*eid)
+                .and_then(|e| e.labels.first().map(|l| l.text.clone()))
+                .unwrap_or_else(|| format!("Entity({})", eid.0))
+        }
+        Value::Text(t) => t.clone(),
+        Value::Number { value, unit } => format!("{} {:?}", value, unit),
+        Value::Boolean(b) => b.to_string(),
+        Value::Coordinate { lat, lon } => format!("{}, {}", lat, lon),
+        Value::Date { timestamp, .. } => format!("timestamp:{}", timestamp),
+        Value::List(items) => format!("{} items", items.len()),
+    };
+
+    let source = format!("{} ({})", relation.source.name, relation.source.locator);
+    Some((answer, source, relation.confidence))
 }

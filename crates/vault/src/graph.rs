@@ -40,8 +40,13 @@ impl KnowledgeGraph {
     pub fn add_entity(&mut self, entity: Entity) {
         // Index all labels (lowercase for case-insensitive lookup)
         for label in &entity.labels {
-            self.label_index
-                .insert(label.text.to_lowercase(), entity.id);
+            let lower = label.text.to_lowercase();
+            self.label_index.insert(lower.clone(), entity.id);
+            // Also index without accents
+            let normalized = remove_accents(&lower);
+            if normalized != lower {
+                self.label_index.insert(normalized, entity.id);
+            }
         }
         self.entities.insert(entity.id, entity);
     }
@@ -92,10 +97,17 @@ impl KnowledgeGraph {
             .unwrap_or_default()
     }
 
-    /// Find entity by label text (case-insensitive).
+    /// Find entity by label text (case-insensitive, accent-insensitive).
     pub fn find_entity_by_label(&self, label: &str) -> Option<&Entity> {
+        let lower = label.to_lowercase();
+        // Try exact match first
+        if let Some(id) = self.label_index.get(&lower) {
+            return self.entities.get(id);
+        }
+        // Try without accents
+        let normalized = remove_accents(&lower);
         self.label_index
-            .get(&label.to_lowercase())
+            .get(&normalized)
             .and_then(|id| self.entities.get(id))
     }
 
@@ -169,6 +181,22 @@ impl KnowledgeGraph {
     pub fn all_predicates(&self) -> impl Iterator<Item = &Predicate> {
         self.predicates.values()
     }
+}
+
+/// Remove common accents/diacritics for fuzzy matching.
+fn remove_accents(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            _ => c,
+        })
+        .collect()
 }
 
 impl Default for KnowledgeGraph {
